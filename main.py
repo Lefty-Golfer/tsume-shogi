@@ -3,17 +3,16 @@ import requests
 from bs4 import BeautifulSoup
 import smtplib
 from email.message import EmailMessage
+from urllib.parse import urljoin
 
 def main():
     # --- 1. 設定 ---
     EMAIL_ADDRESS = "express.t.ogino@gmail.com"
-    # ※ セキュリティのため、環境変数からGmailのアプリパスワードを取得します
     APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD") 
     
     if not APP_PASSWORD:
         raise ValueError("環境変数 'GMAIL_APP_PASSWORD' が設定されていません。")
 
-    BASE_URL = "https://www.shogi.or.jp"
     LIST_URL = "https://www.shogi.or.jp/tsume_shogi/everyday/"
 
     # --- 2. 最新の詰将棋ページのURLを取得 ---
@@ -21,27 +20,30 @@ def main():
     res_list.raise_for_status()
     soup_list = BeautifulSoup(res_list.content, 'html.parser')
     
-    # 最新の記事リンクを取得
-    latest_link_tag = soup_list.select_one('a[href^="/tsume_shogi/everyday/20"]')
+    # 「日の詰将棋」というテキストを含むリンクを取得
+    latest_link_tag = None
+    for a in soup_list.find_all('a'):
+        if a.text and '日の詰将棋' in a.text:
+            latest_link_tag = a
+            break
+
     if not latest_link_tag:
         raise Exception("最新の詰将棋リンクが見つかりませんでした。")
         
-    latest_url = BASE_URL + latest_link_tag['href']
+    latest_url = urljoin(LIST_URL, latest_link_tag['href'])
 
     # --- 3. 詰将棋ページから画像を抽出してダウンロード ---
     res_detail = requests.get(latest_url)
     res_detail.raise_for_status()
     soup_detail = BeautifulSoup(res_detail.content, 'html.parser')
     
-    # 盤面画像を抽出（メインコンテンツ内の最初の画像）
-    img_tag = soup_detail.select_one('main img, .contents img, article img')
+    # 盤面画像を抽出（メインコンテンツ領域の最初の画像を狙う）
+    img_tag = soup_detail.select_one('main img, .contents img, article img, .postBody img, #main img')
         
     if not img_tag or not img_tag.get('src'):
         raise Exception("画像が見つかりませんでした。")
         
-    img_url = img_tag['src']
-    if not img_url.startswith("http"):
-        img_url = BASE_URL + img_url
+    img_url = urljoin(latest_url, img_tag['src'])
 
     res_img = requests.get(img_url)
     res_img.raise_for_status()
