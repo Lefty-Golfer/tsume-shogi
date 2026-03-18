@@ -35,29 +35,36 @@ def main():
         
     latest_url = urljoin(LIST_URL, latest_link_tag['href'])
 
-    # --- 修正ポイント: 記事ページ内の画像抽出ロジックの厳密化 ---
+    # --- 修正ポイント: 記事本文エリアの特定と画像抽出の確実化 ---
     res_detail = requests.get(latest_url)
     res_detail.raise_for_status()
     soup_detail = BeautifulSoup(res_detail.content, 'html.parser')
     
     img_tag = None
-    # 1. 記事の大見出し(h1)を探す
-    h1_tag = soup_detail.find('h1')
     
-    if h1_tag:
-        # 2. 見出しより後ろにある画像の中から探す
-        for img in h1_tag.find_all_next('img'):
+    # 1. 「〇年〇月〇日の詰将棋」というテキストを含む見出しタグ(h1〜h6)を正確に探す
+    heading_tag = soup_detail.find(lambda tag: tag.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] and target_text in tag.get_text())
+    
+    if heading_tag:
+        # 見出しが見つかった場合、その直後にある本文画像を抽出
+        for img in heading_tag.find_all_next('img'):
             src = img.get('src', '').lower()
-            # アイコンやバナー等の不要な画像を除外
-            if 'icon' not in src and 'banner' not in src and 'logo' not in src:
+            # ヘッダー/サイドバー等の不要な画像（アイコン、バナー等）を除外
+            if any(x in src for x in ['icon', 'banner', 'logo', 'btn', 'share', 'sns']):
+                continue
+            img_tag = img
+            break
+            
+    # 2. 見出しが見つからなかった場合の予備手段（本文領域を直接指定）
+    if not img_tag:
+        main_areas = soup_detail.select('article, main, .postBody, .text, .contents, #main')
+        for area in main_areas:
+            for img in area.find_all('img'):
+                src = img.get('src', '').lower()
+                if any(x in src for x in ['icon', 'banner', 'logo', 'btn', 'share', 'sns']):
+                    continue
                 img_tag = img
                 break
-                
-    # 3. 万が一見出しが見つからなかった場合の予備手段（本文エリアを直接指定）
-    if not img_tag:
-        selectors = ['.postBody img', '.text img', 'article img']
-        for selector in selectors:
-            img_tag = soup_detail.select_one(selector)
             if img_tag:
                 break
         
@@ -85,7 +92,7 @@ def main():
         smtp.login(EMAIL_ADDRESS, APP_PASSWORD)
         smtp.send_message(msg)
 
-    print(f"{target_text}のメール送信が完了しました。")
+    print(f"{target_text}の画像の抽出およびメール送信が完了しました。")
 
 if __name__ == "__main__":
     main()
