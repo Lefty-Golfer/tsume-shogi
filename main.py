@@ -7,7 +7,6 @@ from urllib.parse import urljoin
 from datetime import datetime, timedelta, timezone
 
 def main():
-    # --- 1. 設定 ---
     EMAIL_ADDRESS = "express.t.ogino@gmail.com"
     APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD") 
     
@@ -19,26 +18,26 @@ def main():
     # 日本時間の取得
     JST = timezone(timedelta(hours=+9), 'JST')
     today = datetime.now(JST)
-    target_text = f"{today.month}月{today.day}日の詰将棋"
+    
+    # 修正ポイント: 「年」を含めた完全な日付フォーマットにし、過去の問題を完全に弾く
+    target_text = f"{today.year}年{today.month}月{today.day}日の詰将棋"
 
-    # --- 2. 最新の詰将棋ページのURLを取得 ---
     res_list = requests.get(LIST_URL)
     res_list.raise_for_status()
     soup_list = BeautifulSoup(res_list.content, 'html.parser')
     
-    # 当日のテキストを含むリンクを厳密に取得
     latest_link_tag = None
     for a in soup_list.find_all('a'):
         if a.text and target_text in a.text:
             latest_link_tag = a
             break
 
+    # 今日の「年・月・日」が完全に一致するリンクがない場合はエラーで止める
     if not latest_link_tag:
-        raise Exception(f"本日（{target_text}）の詰将棋リンクがまだありません。サイト更新前である可能性が高いです。")
+        raise Exception(f"本日（{target_text}）のリンクがありません。サイト更新前です。")
         
     latest_url = urljoin(LIST_URL, latest_link_tag['href'])
 
-    # --- 3. 詰将棋ページから画像を抽出してダウンロード ---
     res_detail = requests.get(latest_url)
     res_detail.raise_for_status()
     soup_detail = BeautifulSoup(res_detail.content, 'html.parser')
@@ -54,7 +53,7 @@ def main():
     res_img.raise_for_status()
     img_data = res_img.content
 
-    # --- 4. メール送信 ---
+    # メール送信
     msg = EmailMessage()
     msg['Subject'] = f"【まいにち詰将棋】{target_text}の問題"
     msg['From'] = EMAIL_ADDRESS
