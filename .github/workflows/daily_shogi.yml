@@ -2,8 +2,8 @@ name: Daily Tsume Shogi
 
 on:
   schedule:
-    # 日本時間の朝7時に実行 (UTCの22時を指定)
-    - cron: '0 22 * * *'
+    # 日本時間の朝9時に実行 (UTCの0時を指定)
+    - cron: '0 0 * * *'
   workflow_dispatch: # 手動実行テスト用
 
 jobs:
