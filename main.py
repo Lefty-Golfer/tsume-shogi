@@ -18,8 +18,6 @@ def main():
     # 日本時間の取得
     JST = timezone(timedelta(hours=+9), 'JST')
     today = datetime.now(JST)
-    
-    # 修正ポイント: 「年」を含めた完全な日付フォーマットにし、過去の問題を完全に弾く
     target_text = f"{today.year}年{today.month}月{today.day}日の詰将棋"
 
     res_list = requests.get(LIST_URL)
@@ -32,20 +30,39 @@ def main():
             latest_link_tag = a
             break
 
-    # 今日の「年・月・日」が完全に一致するリンクがない場合はエラーで止める
     if not latest_link_tag:
         raise Exception(f"本日（{target_text}）のリンクがありません。サイト更新前です。")
         
     latest_url = urljoin(LIST_URL, latest_link_tag['href'])
 
+    # --- 修正ポイント: 記事ページ内の画像抽出ロジックの厳密化 ---
     res_detail = requests.get(latest_url)
     res_detail.raise_for_status()
     soup_detail = BeautifulSoup(res_detail.content, 'html.parser')
     
-    img_tag = soup_detail.select_one('main img, .contents img, article img, .postBody img, #main img')
+    img_tag = None
+    # 1. 記事の大見出し(h1)を探す
+    h1_tag = soup_detail.find('h1')
+    
+    if h1_tag:
+        # 2. 見出しより後ろにある画像の中から探す
+        for img in h1_tag.find_all_next('img'):
+            src = img.get('src', '').lower()
+            # アイコンやバナー等の不要な画像を除外
+            if 'icon' not in src and 'banner' not in src and 'logo' not in src:
+                img_tag = img
+                break
+                
+    # 3. 万が一見出しが見つからなかった場合の予備手段（本文エリアを直接指定）
+    if not img_tag:
+        selectors = ['.postBody img', '.text img', 'article img']
+        for selector in selectors:
+            img_tag = soup_detail.select_one(selector)
+            if img_tag:
+                break
         
     if not img_tag or not img_tag.get('src'):
-        raise Exception("画像が見つかりませんでした。")
+        raise Exception("本文内に盤面画像が見つかりませんでした。")
         
     img_url = urljoin(latest_url, img_tag['src'])
 
