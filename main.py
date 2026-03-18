@@ -15,7 +15,6 @@ def main():
 
     LIST_URL = "https://www.shogi.or.jp/tsume_shogi/everyday/"
 
-    # 日本時間の取得
     JST = timezone(timedelta(hours=+9), 'JST')
     today = datetime.now(JST)
     target_text = f"{today.year}年{today.month}月{today.day}日の詰将棋"
@@ -35,47 +34,48 @@ def main():
         
     latest_url = urljoin(LIST_URL, latest_link_tag['href'])
 
-    # --- 修正ポイント: 記事本文エリアの特定と画像抽出の確実化 ---
     res_detail = requests.get(latest_url)
     res_detail.raise_for_status()
     soup_detail = BeautifulSoup(res_detail.content, 'html.parser')
     
-    img_tag = None
+    # --- 修正ポイント: 画像の「ファイルサイズ」で盤面図を論理的に特定する ---
+    best_img_data = None
+    max_size = 0
+    best_ext = 'jpeg'
     
-    # 1. 「〇年〇月〇日の詰将棋」というテキストを含む見出しタグ(h1〜h6)を正確に探す
-    heading_tag = soup_detail.find(lambda tag: tag.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] and target_text in tag.get_text())
-    
-    if heading_tag:
-        # 見出しが見つかった場合、その直後にある本文画像を抽出
-        for img in heading_tag.find_all_next('img'):
-            src = img.get('src', '').lower()
-            # ヘッダー/サイドバー等の不要な画像（アイコン、バナー等）を除外
-            if any(x in src for x in ['icon', 'banner', 'logo', 'btn', 'share', 'sns']):
-                continue
-            img_tag = img
-            break
-            
-    # 2. 見出しが見つからなかった場合の予備手段（本文領域を直接指定）
-    if not img_tag:
-        main_areas = soup_detail.select('article, main, .postBody, .text, .contents, #main')
-        for area in main_areas:
-            for img in area.find_all('img'):
-                src = img.get('src', '').lower()
-                if any(x in src for x in ['icon', 'banner', 'logo', 'btn', 'share', 'sns']):
-                    continue
-                img_tag = img
-                break
-            if img_tag:
-                break
-        
-    if not img_tag or not img_tag.get('src'):
-        raise Exception("本文内に盤面画像が見つかりませんでした。")
-        
-    img_url = urljoin(latest_url, img_tag['src'])
+    # 本文エリア内、または見出し以降の画像を最大15枚リストアップ
+    target_images = soup_detail.select('article img, main img, .postBody img, .text img, .pageContents img')
+    if not target_images:
+        heading_tag = soup_detail.find(lambda tag: tag.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] and target_text in tag.get_text())
+        if heading_tag:
+            target_images = heading_tag.find_all_next('img', limit=15)
 
-    res_img = requests.get(img_url)
-    res_img.raise_for_status()
-    img_data = res_img.content
+    if not target_images:
+        raise Exception("ページ内に画像が見つかりませんでした。")
+
+    # リストアップした画像を順番に確認し、最もデータサイズが大きいものを「盤面」とする
+    for img in target_images:
+        src = img.get('src', '').lower()
+        if any(x in src for x in ['icon', 'banner', 'logo', 'btn', 'share', 'sns', 'thumb']):
+            continue
+            
+        img_url = urljoin(latest_url, img.get('src', ''))
+        try:
+            res_img = requests.get(img_url, timeout=5)
+            res_img.raise_for_status()
+            size = len(res_img.content)
+            
+            # 最大サイズを更新した場合のみ保持
+            if size > max_size:
+                max_size = size
+                best_img_data = res_img.content
+                ext = img_url.split('.')[-1][:3]
+                best_ext = 'png' if 'png' in ext.lower() else 'jpeg'
+        except:
+            continue
+            
+    if not best_img_data:
+        raise Exception("画像のダウンロードに失敗したか、有効な画像がありませんでした。")
 
     # メール送信
     msg = EmailMessage()
@@ -84,15 +84,13 @@ def main():
     msg['To'] = EMAIL_ADDRESS
     msg.set_content(f"本日の詰将棋です。\n\n出題元ページ: {latest_url}")
     
-    ext = img_url.split('.')[-1][:3]
-    subtype = 'png' if 'png' in ext.lower() else 'jpeg'
-    msg.add_attachment(img_data, maintype='image', subtype=subtype, filename=f"tsume_shogi_{today.strftime('%Y%m%d')}.{subtype}")
+    msg.add_attachment(best_img_data, maintype='image', subtype=best_ext, filename=f"tsume_shogi_{today.strftime('%Y%m%d')}.{best_ext}")
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login(EMAIL_ADDRESS, APP_PASSWORD)
         smtp.send_message(msg)
 
-    print(f"{target_text}の画像の抽出およびメール送信が完了しました。")
+    print(f"{target_text}の送信完了（画像サイズ: {max_size} bytes）")
 
 if __name__ == "__main__":
     main()
